@@ -1,0 +1,14 @@
+{
+  "name": "claude-privacy-guard",
+  "description": "Keeps email addresses, secrets and confidential names out of what Claude Code does on your behalf.",
+  "owner": {
+    "name": "Cotspheer"
+  },
+  "plugins": [
+    {
+      "name": "privacy-guard",
+      "source": "./",
+      "description": "Keeps email addresses, secrets and confidential names out of what Claude Code does on your behalf."
+    }
+  ]
+}

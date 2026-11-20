@@ -1,0 +1,10 @@
+{
+  "name": "privacy-guard",
+  "version": "0.4.1",
+  "description": "Keeps email addresses, secrets and confidential names out of what Claude Code does on your behalf.",
+  "author": {
+    "name": "Cotspheer",
+    "url": "https://github.com/Cotspheer"
+  },
+  "license": "Apache-2.0"
+}

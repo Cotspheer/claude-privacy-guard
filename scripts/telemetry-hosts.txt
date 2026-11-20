@@ -1,0 +1,63 @@
+# The hosts Claude Code and the Claude desktop app talk to, in three groups. One host per line; "#" starts a
+# comment, and the comment after a host says what it carries.
+#
+#   [default], [extended]   telemetry only: the block scripts point these nowhere
+#   [needed]                left alone on purpose; the host check uses them to tell known hosts from new ones
+#
+# A hosts file knows no wildcards, so every blocked name is spelled out. In [needed], "*." in front matches
+# every name below that domain.
+
+[default]
+# Named by Anthropic's own documentation as carrying telemetry only, and as optional.
+
+# Claude Code (code.claude.com/docs: network access requirements)
+http-intake.logs.us5.datadoghq.com     # operational telemetry events
+browser-intake-us5-datadoghq.com       # error reports; also the desktop app's performance timing
+
+# Claude desktop app (claude.com/docs: telemetry and egress, "essential telemetry")
+browser-intake-datadoghq.com           # performance timing
+browser-intake-us3-datadoghq.com       # performance timing
+browser-intake-ap1-datadoghq.com       # performance timing
+browser-intake-ap2-datadoghq.com       # performance timing
+browser-intake-datadoghq.eu            # performance timing
+browser-intake-ddog-gov.com            # performance timing
+o1158394.ingest.us.sentry.io           # crash and error reports (the app's address behind the documented *.ingest.us.sentry.io)
+
+[extended]
+# Product analytics of the claude.ai pages, which the desktop app shows too. Not in Anthropic's host tables;
+# identified from captures of the pages' traffic and from the host names in the desktop app. Nothing from
+# Anthropic says what else these hosts serve, and blocking them is untested: take the entries out again
+# (run the script once with --remove or -Remove, then without the extended option) if a page misbehaves.
+a-api.anthropic.com                    # analytics events
+a-cdn.anthropic.com                    # the analytics script
+a.claude.ai                            # analytics events
+a-cdn.claude.ai                        # the analytics script
+
+[needed]
+# More than telemetry runs over these, so they stay reachable.
+api.anthropic.com                      # the model API; also Claude Code's usage events and feature flags (only the settings stop those)
+claude.ai                              # the app, sign-in and the update feed; also analytics events and performance timing
+claude.com                             # sign-in redirect, documentation
+platform.claude.com                    # sign-in and token refresh
+sso.claude.com                         # single sign-on
+downloads.claude.ai                    # updates, plugin downloads, the model catalog
+releases.claude.com                    # update feed, the built-in browser's site check
+config.claude.com                      # configuration
+mcp-proxy.anthropic.com                # connectors set up on claude.ai
+*.mcp.claude.com                       # connectors run by Anthropic
+bridge.claudeusercontent.com           # Claude in Chrome
+*.claudeusercontent.com                # artifacts and previews
+*.claudemcpcontent.com                 # connector widgets
+assets.claude.ai                       # fonts and images
+assets-proxy.anthropic.com             # fonts and images
+code.claude.com                        # documentation lookups
+s-cdn.anthropic.com                    # the browser check at sign-in; blocked, sign-in can fail
+statsig.anthropic.com                  # older Claude Code versions only: metrics and feature flags
+sentry.io                              # everyone's Sentry, not only Anthropic's reports
+storage.googleapis.com                 # plugin listing data
+registry.npmjs.org                     # plugin and MCP server installs
+github.com                             # plugin marketplaces
+raw.githubusercontent.com              # release notes
+*.hcaptcha.com                         # the browser check at sign-in
+hcaptcha.com                           # the browser check at sign-in
+accounts.google.com                    # sign-in with Google
