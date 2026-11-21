@@ -5,37 +5,29 @@ import { createHmac } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { configDir } from './lib.mjs';
+import { configDir, countBlocked } from './lib.mjs';
+import { PERSONAL_PLACEHOLDER, SECRET_PLACEHOLDER, findSensitive, maskSensitive } from './rules.mjs';
 
-export const SECRET_PLACEHOLDER = '[secret hidden]';
+export { PERSONAL_PLACEHOLDER, SECRET_PLACEHOLDER };
+
 export const TERM_PLACEHOLDER = '[term hidden]';
 
-// Only formats that identify themselves: a provider's prefix, or a key's own header. Nothing is guessed from
-// how random a string looks, so ordinary hashes, ids and base64 data pass.
-const SECRETS = [
-  /sk-ant-[A-Za-z0-9_-]{20,}/g, // Anthropic
-  /sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}/g, // OpenAI
-  /gh[pousr]_[A-Za-z0-9]{36,}/g, // GitHub tokens
-  /github_pat_[A-Za-z0-9_]{50,}/g, // GitHub fine-grained tokens
-  /(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, // AWS access key ids
-  /AIza[0-9A-Za-z_-]{35}/g, // Google API keys
-  /xox[abprs]-[A-Za-z0-9-]{10,}/g, // Slack
-  /[sr]k_live_[A-Za-z0-9]{20,}/g, // Stripe live keys
-  /npm_[A-Za-z0-9]{36}/g, // npm
-  /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, // JSON Web Tokens
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, // private keys
-];
+/** Hides what the rules of rules.mjs find: secrets, and personal data where its rules are switched on. */
+export const maskSecrets = maskSensitive;
 
-export function maskSecrets(text) {
-  let count = 0;
-  let masked = text;
-  for (const pattern of SECRETS) {
-    masked = masked.replace(pattern, () => {
-      count++;
-      return SECRET_PLACEHOLDER;
-    });
-  }
-  return { text: masked, count };
+/**
+ * What a text holds that must not reach Claude, as phrases such as "2 email address(es)" and
+ * "1 secret(s) (rule github-token)". An empty list means nothing was found.
+ */
+export function findingsIn(text, allow, lists) {
+  const found = findSensitive(text);
+  const part = (kind, label) => {
+    const rules = found.filter((item) => item.kind === kind).map((item) => item.rule);
+    return [rules.length, `${label} (rule ${[...new Set(rules)].join(', ')})`];
+  };
+  return [[countBlocked(text, allow), 'email address(es)'], part('secret', 'secret(s)'), part('personal', 'personal data value(s)'), [maskTerms(text, lists, true).count, 'confidential term(s)']]
+    .filter(([count]) => count > 0)
+    .map(([count, kind]) => `${count} ${kind}`);
 }
 
 // ---------------------------------------------------------------------------------------------------------

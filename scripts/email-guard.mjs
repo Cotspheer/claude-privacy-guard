@@ -3,17 +3,20 @@
 //   - its input holds an email address that is not allowed,
 //   - it leaves the computer and holds a secret or one of the user's confidential terms
 //     (with "mode: everywhere" in the terms file, a term is denied in every tool call),
-//   - it would write the placeholder of a hidden value into a file, or
+//   - it would write the placeholder of a hidden value into a file,
+//   - it would print a file of private keys or tokens (id_rsa, *.pem, .aws/credentials), or
 //   - it is a `git commit` and the changes to be committed add an email address.
 
 import { execFileSync } from 'node:child_process';
+import { credentialKind, keyFilesPrinted } from './credentials.mjs';
 import { PLACEHOLDER, countBlocked, loadAllow, readHookInput } from './lib.mjs';
 import { isOffice } from './office.mjs';
 import { closeGaps, extractScript, isPicture, pictureSettings, textOf } from './pictures.mjs';
-import { SECRET_PLACEHOLDER, TERM_PLACEHOLDER, isOutbound, loadTermLists, maskSecrets, maskTerms } from './sensitive.mjs';
+import { cannotAsk, settingsFile } from './settings.mjs';
+import { PERSONAL_PLACEHOLDER, SECRET_PLACEHOLDER, TERM_PLACEHOLDER, findingsIn, isOutbound, loadTermLists, maskSecrets, maskTerms } from './sensitive.mjs';
 
 const WRITING_FIELDS = { Write: ['content'], Edit: ['new_string'], NotebookEdit: ['new_source'] };
-const PLACEHOLDERS = [PLACEHOLDER, SECRET_PLACEHOLDER, TERM_PLACEHOLDER];
+const PLACEHOLDERS = [PLACEHOLDER, SECRET_PLACEHOLDER, PERSONAL_PLACEHOLDER, TERM_PLACEHOLDER];
 const GIT_COMMIT = /\bgit\b[^|;&\n]*\bcommit\b/;
 
 function deny(reason) {
@@ -94,11 +97,17 @@ function reasonToDeny(payload) {
     );
   }
   if (outbound) {
-    const found = fieldsWith(input, (text) => maskSecrets(text).count);
+    const rules = new Set();
+    const found = fieldsWith(input, (text) => {
+      const result = maskSecrets(text);
+      for (const rule of result.rules) rules.add(rule);
+      return result.count;
+    });
     if (found.length > 0) {
       return (
-        `privacy-guard: this ${tool} call would send what looks like a secret (an API key, a token or a private key) in ${found.join(', ')}. ` +
-        'Secrets stay out of calls that leave the computer. Pass it through an environment variable or a file the command reads, or ask the user.'
+        `privacy-guard: this ${tool} call would send what looks like a secret or personal data in ${found.join(', ')} (rule ${[...rules].join(', ')}). ` +
+        'Such values stay out of calls that leave the computer. Pass a secret through an environment variable or a file the command reads, or ask the user. ' +
+        `If the rule is wrong about this value, tell the user: they can list the value under "allowedValues" or the rule under "disabledRules" in ${settingsFile()}.`
       );
     }
   }
@@ -145,32 +154,70 @@ function pictureDecision(payload) {
 
   const read = textOf(path);
   if (read.text !== undefined) {
-    const text = closeGaps(read.text);
-    const found = [
-      [countBlocked(text, loadAllow()), 'email address(es)'],
-      [maskSecrets(text).count, 'secret(s)'],
-      [maskTerms(text, loadTermLists(), true).count, 'confidential term(s)'],
-    ].filter(([count]) => count > 0);
+    const found = findingsIn(closeGaps(read.text), loadAllow(), loadTermLists());
     if (found.length > 0) {
       return {
         deny:
-          `privacy-guard: this file holds ${found.map(([count, kind]) => `${count} ${kind}`).join(', ')}, and a picture or PDF cannot be masked on its way to you. ` +
+          `privacy-guard: this file holds ${found.join(', ')}, and a picture or PDF cannot be masked on its way to you. ` +
           `${instead} Tell the user that you worked from the text and not from the picture.`,
       };
     }
   }
-  if (settings.mode === 'confirm') {
+  if (settings.mode === 'confirm' && !settings.isAllowed(path)) {
     const checked = read.text !== undefined ? 'The guard read its text and found no address, secret or confidential term.' : `The guard could not read its text (${read.unavailable}).`;
+    // Where nobody is shown a question, asking would let the picture through unseen.
+    if (cannotAsk(payload.permission_mode)) {
+      return {
+        deny:
+          `privacy-guard: the person is to confirm every picture and PDF (the guard is set to "confirm"), and this session runs in the permission mode "${payload.permission_mode}", where a question does not reach them. ${instead} ` +
+          'To open the picture itself, the user switches to the default permission mode or lists its folder under "picturesAllowed".',
+      };
+    }
     return { ask: `privacy-guard: Claude wants to open a picture or PDF. ${checked} What stands in it reaches Claude unmasked.` };
   }
   return undefined;
 }
 
+/** The reason to refuse a call that would put a file of private keys or tokens into Claude's context, or undefined. */
+function keyFileReason(payload) {
+  const tool = payload.tool_name;
+  const input = payload.tool_input ?? {};
+  let files = [];
+  if (tool === 'Read' && credentialKind(input.file_path) === 'key') files = [input.file_path];
+  else if (tool === 'Grep' && input.output_mode === 'content') {
+    // A search prints the lines it finds: in a key file, or in the key files a pattern such as "*.pem" picks.
+    files = [input.path, typeof input.glob === 'string' ? input.glob.replace(/\*+/g, 'x') : undefined].filter((path) => credentialKind(path) === 'key');
+  } else if (tool === 'Bash' || tool === 'PowerShell') files = keyFilesPrinted(asText(input.command));
+  if (files.length === 0) return undefined;
+  return (
+    `privacy-guard: ${files.join(', ')} holds private keys or tokens, and this ${tool} call would put them into the conversation. ` +
+    'A command may use such a file (ssh -i, a program that reads it) without printing it. ' +
+    `If its content is needed, ask the user; they can list the file under "credentialFilesAllowed" in ${settingsFile()}.`
+  );
+}
+
+/**
+ * A change to the guard's own settings is the person's to confirm: a rule switched off or a file allowed there
+ * opens what the guard closes. Where no question reaches them, the change is refused.
+ */
+function settingsDecision(payload) {
+  const input = payload.tool_input ?? {};
+  const tool = payload.tool_name;
+  const named = (text) => /privacy-guard\.json/i.test(asText(text ?? ''));
+  const writes = ((tool === 'Write' || tool === 'Edit') && named(input.file_path)) || ((tool === 'Bash' || tool === 'PowerShell') && named(input.command) && /(?:>|\bset-content\b|\bout-file\b|\btee\b|\bsed\b|\bmv\b|\bcp\b|\bmove-item\b|\bcopy-item\b|\brm\b|\bremove-item\b|writeFile)/i.test(asText(input.command)));
+  if (!writes) return undefined;
+  const what = "privacy-guard: this call changes the guard's settings (privacy-guard.json), where rules are switched off and files are allowed.";
+  if (cannotAsk(payload.permission_mode)) {
+    return { deny: `${what} The person has to confirm that, and this session runs in the permission mode "${payload.permission_mode}", where a question does not reach them. Show them the change and let them make it.` };
+  }
+  return { ask: `${what} Allow it only if you asked for this change.` };
+}
+
 const payload = await readHookInput('email-guard');
-const reason = reasonToDeny(payload);
+const reason = reasonToDeny(payload) ?? keyFileReason(payload);
 if (reason) deny(reason);
 else {
-  const decision = pictureDecision(payload);
+  const decision = settingsDecision(payload) ?? pictureDecision(payload);
   if (decision?.deny) deny(decision.deny);
   else if (decision?.ask) {
     process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: decision.ask } }));

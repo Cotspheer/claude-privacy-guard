@@ -3,3 +3,11 @@ Copyright 2026 Cotspheer
 
 This product includes software developed by Cotspheer
 (https://github.com/Cotspheer/claude-privacy-guard).
+
+data/gitleaks-rules.json holds detection rules from gitleaks
+(https://github.com/gitleaks/gitleaks), Copyright (c) 2019 Zachary Rice, MIT License
+(data/gitleaks-LICENSE), in the JavaScript conversion made by Datum Brain for
+claude-code-privacy-guard (https://github.com/datumbrain/claude-code-privacy-guard),
+Copyright (c) 2026 Datum Brain, MIT License (data/conversion-LICENSE). The check for a
+random-looking value after a secret keyword in scripts/rules.mjs follows the approach of
+that project.

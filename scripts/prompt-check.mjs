@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // UserPromptSubmit hook for Claude Code: stops a message before it reaches Claude when it holds an email address,
-// or one of the user's confidential terms while a list says "mode: everywhere". The same goes for the text
-// files the message attaches with an @ mention: their content is put into Claude's context without a tool
-// call, so the output mask never sees it. Attached images and PDFs are read with the local text recognition.
-// The person sees why and decides.
+// a secret, personal data a rule is switched on for, or one of the user's confidential terms while a list says
+// "mode: everywhere". A hook cannot change a message, so the person gets a cleaned copy to send in its place.
+// The same goes for the text files the message attaches with an @ mention: their content is put into Claude's
+// context without a tool call, so the output mask never sees it. Attached images and PDFs are read with the
+// local text recognition. The person sees why and decides.
 
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import { countBlocked, loadAllow, readHookInput, userAllowFile } from './lib.mjs';
+import { loadAllow, mask, readHookInput, userAllowFile } from './lib.mjs';
 import { closeGaps, extractScript, isPicture, pictureSettings, textOf } from './pictures.mjs';
-import { loadTermLists, maskSecrets, maskTerms } from './sensitive.mjs';
+import { findingsIn, loadTermLists, maskSecrets, maskTerms } from './sensitive.mjs';
+import { settingsFile } from './settings.mjs';
 
 /** Attached files are read up to this size; a larger one is checked in its first part only. */
 const ATTACHMENT_LIMIT = 2 * 1024 * 1024;
@@ -48,29 +50,30 @@ function attachedFiles() {
   return files;
 }
 
-const addresses = countBlocked(prompt, allow);
-const confidential = maskTerms(prompt, lists, true).count;
+/** A message is given back cleaned up to this length; a longer one is only refused. */
+const COPY_LIMIT = 8000;
 
-if (addresses > 0) {
+/** The message with what was found replaced by placeholders, for the person to send in its place. */
+function cleaned() {
+  if (prompt.length > COPY_LIMIT) return '';
+  const copy = maskTerms(mask(maskSecrets(prompt).text, allow).text, lists, true).text;
+  return `\n\nThe same message with those values replaced, to copy and send:\n\n${copy}`;
+}
+
+const inPrompt = findingsIn(prompt, allow, lists);
+
+if (inPrompt.length > 0) {
   block(
-    `privacy-guard: your message holds ${addresses} email address(es) and was not sent. ` +
-      'Send it again without them. If Claude may see and use an address, add it or its @domain to ' +
-      `${userAllowFile()} first.`,
-  );
-} else if (confidential > 0) {
-  block(
-    `privacy-guard: your message holds ${confidential} confidential term(s) and was not sent. ` +
-      "Send it again without them. The list they are on is set to keep its terms out of Claude's view entirely.",
+    `privacy-guard: your message holds ${inPrompt.join(', ')} and was not sent. ` +
+      'Send it again without them. If Claude may see and use an email address, add it or its @domain to ' +
+      `${userAllowFile()} first; a value a rule is wrong about goes under "allowedValues" in ${settingsFile()}.` +
+      cleaned(),
   );
 } else {
   const found = [];
-  for (const file of attachedFiles()) {
-    const parts = [
-      [countBlocked(file.text, allow), 'email address(es)'],
-      [maskSecrets(file.text).count, 'secret(s)'],
-      [maskTerms(file.text, lists, true).count, 'confidential term(s)'],
-    ].filter(([count]) => count > 0);
-    if (parts.length > 0) found.push(`${file.named} (${parts.map(([count, kind]) => `${count} ${kind}`).join(', ')})`);
+  for (const attached of attachedFiles()) {
+    const parts = findingsIn(attached.text, allow, lists);
+    if (parts.length > 0) found.push(`${attached.named} (${parts.join(', ')})`);
   }
   if (found.length > 0) {
     block(

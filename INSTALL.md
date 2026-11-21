@@ -69,10 +69,12 @@ get it right.
 | Part | What it does | Where it can live |
 |---|---|---|
 | Tool-call guard | Denies any tool call whose input holds an email address (shell commands, file writes, searches, fetch URLs, agent briefs, MCP tools) | Claude Code: the plugin, or a repository's `.claude/hooks/` |
-| Output mask | Hides email addresses and secrets (API keys, tokens, private keys) in what tools return, before Claude reads it | same |
+| Output mask | Hides email addresses, secrets and (where switched on) personal data in what tools return, before Claude reads it | same |
+| Credential files | Refuses to read or print a file of private keys or tokens; shows a file of `NAME=value` lines (`.env`) and a listing of the environment with the values hidden | same |
+| Personal data rules | IBAN, Swiss AHV number, payment card, phone number, US social security number: off until the person switches them on | same, set in `privacy-guard.json` |
 | Secret guard | Denies a call that leaves the computer (web search, fetch, MCP tools, shell commands that call out) when it holds a secret | same |
 | Confidential terms | Denies such a call when it holds a term from the person's own list, also with typing mistakes; optionally keeps the terms out of Claude's view entirely | same, plus the person's list file |
-| Prompt check | Stops a message the person sends when it holds an address, or attaches a file with `@` that does, and tells them | same |
+| Prompt check | Stops a message the person sends when it holds an address or a secret, or attaches a file with `@` that does; gives them a copy of the message with those values replaced | same |
 | Account address | Leaves the address of the signed-in account out of the context Claude is given | the plugin only |
 | Document reader | Gives Claude the text of an image, a PDF, a Word, Excel, PowerPoint or OpenDocument file, with the text of pictures embedded in it, read on this computer; the output mask hides values in it. A rule tells Claude to use it, and to pass images that its own extraction tools produce through it | same |
 | Paste check | Reads images and documents pasted into a message before it is sent; holds the message back when one holds an address, a secret or a term kept from Claude | the plugin only |
@@ -154,6 +156,7 @@ The questions of this part, in order. Each row is one turn of the rhythm, or mor
 | A4 | Block the telemetry-only hosts? | the nine documented hosts, those plus four analytics hosts, no |
 | A5 | Three settings, one turn each: session links in commits, claude.ai connectors, credential folders | apply, skip |
 | A5b | How should images and PDFs be handled? | check them (default), check and ask me each time, refuse them all, leave them unchecked |
+| A5c | Should the guard also look for personal data (IBAN, AHV number, card, phone, US social security number)? | none (default), IBAN and AHV number, all five, let me pick |
 | A6 | Are there names that must never leave this computer through Claude? | yes (continue with the terms skill, one question at a time), no |
 | A6b | none: you tell them what only they can do | |
 | A7 | none: you run the proof and report | |
@@ -393,6 +396,34 @@ Tell them the limits:
   own tier (part C, `appendPlugins`); whether the removal then works is untested. The proof in A7 shows which
   case applies.
 
+### A5c. Credential files and personal data
+
+Tell them what is on without a choice, in three sentences:
+
+- A file of private keys or tokens (`id_rsa`, `*.pem`, `.aws/credentials`) is not read or printed.
+- A `.env` file is read with the names shown and the values hidden; a listing of the environment loses the
+  values under names that sound like a secret.
+- Secrets are found by rules, and every message names the rule. A rule that is wrong about a value is settled
+  with `allowedValues` or `disabledRules` in `privacy-guard.json`.
+
+Then ask one question: should the guard also look for personal data? Name the five rules and what each costs:
+
+- `iban` and `ch-ahv-number`: validated by checksum, rarely wrong. Recommended for anyone who handles client
+  or staff records.
+- `payment-card`: validated by checksum and issuer. Rarely wrong.
+- `phone-number`: phone numbers in their written forms. Gets in the way where contact data is the work itself.
+- `us-ssn`: only of use with US records.
+
+A developer who works with test IBANs or card numbers should know that those will be hidden in tool output
+too; single test values go under `allowedValues`.
+
+Write their choice into `privacy-guard.json` in the Claude config folder, after showing it, and keep the keys
+the file already has. Claude Code will ask them to confirm the write: the guard has every change to its own
+settings confirmed by the person. The content: `{ "enabledRules": ["iban", "ch-ahv-number"] }`. `"personal"` stands for all five.
+
+If they have files the credential guard should leave alone (a test certificate, a `.env.test` without real
+values), add them as `"credentialFilesAllowed": [".env.test", "tests/fixtures/*.pem"]`.
+
 ### A6. Confidential terms
 
 Ask whether there are names that must never leave the computer through Claude: clients, matters, projects,
@@ -477,13 +508,15 @@ Ask whether to install into this repository too. On a yes, do section B for it.
 What reaches a cloud session is what is committed and pushed. Work in a branch and leave committing and pushing
 to the person unless they ask you to.
 
-Explain that first, with what will be added to the repository (nine script files, two rule files, three hooks
+Explain that first, with what will be added to the repository (twelve script files, the rule data, two rule files, three hooks
 in its settings), and ask whether to go ahead. Steps 1 to 3 need no further question. Steps 4, 5 and 7 each end
 in a question of their own; ask them one at a time.
 
-1. Copy these nine files from `scripts/` into `.claude/hooks/privacy-guard/` of the target repository:
-   `lib.mjs`, `sensitive.mjs`, `pictures.mjs`, `office.mjs`, `email-guard.mjs`, `mask-output.mjs`,
-   `prompt-check.mjs`, `extract-text.mjs`, `read-text.ps1`.
+1. Copy these twelve files from `scripts/` into `.claude/hooks/privacy-guard/` of the target repository:
+   `lib.mjs`, `settings.mjs`, `rules.mjs`, `credentials.mjs`, `sensitive.mjs`, `pictures.mjs`, `office.mjs`,
+   `email-guard.mjs`, `mask-output.mjs`, `prompt-check.mjs`, `extract-text.mjs`, `read-text.ps1`. Copy the
+   folder `data/` (the rules converted from gitleaks, with their licences) to
+   `.claude/hooks/privacy-guard/data/`.
 2. Copy `rules/email-address.md` and `rules/documents.md` into `.claude/rules/` there. In the copy of
    `documents.md`, replace `{extract}` with `.claude/hooks/privacy-guard/extract-text.mjs`. Files in that
    folder are always in context, so the repository does not need the skill as well.

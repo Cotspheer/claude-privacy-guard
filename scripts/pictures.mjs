@@ -2,11 +2,11 @@
 // their text itself, on this computer, before Claude opens them.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { configDir } from './lib.mjs';
+import { loadSettings } from './settings.mjs';
 import { isOffice, readOffice } from './office.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -65,14 +65,9 @@ function textOfOffice(path) {
  *   "off"      pictures pass unread
  */
 export function pictureSettings() {
-  const file = process.env.PRIVACY_GUARD_SETTINGS_FILE ?? join(configDir(), 'privacy-guard.json');
-  let settings = {};
-  try {
-    if (existsSync(file)) settings = JSON.parse(readFileSync(file, 'utf8'));
-  } catch {}
-  const mode = ['check', 'confirm', 'strict', 'off'].includes(settings.pictures) ? settings.pictures : 'check';
-  const allowed = Array.isArray(settings.picturesAllowed) ? settings.picturesAllowed.map((folder) => resolve(String(folder)).toLowerCase()) : [];
-  return { mode, isAllowed: (path) => allowed.some((folder) => resolve(path).toLowerCase().startsWith(folder)) };
+  const settings = loadSettings();
+  const allowed = settings.picturesAllowed.map((folder) => resolve(folder).toLowerCase());
+  return { mode: settings.pictures, isAllowed: (path) => allowed.some((folder) => resolve(path).toLowerCase().startsWith(folder)) };
 }
 
 function run(command, args) {

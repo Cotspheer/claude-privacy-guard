@@ -6,9 +6,9 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { extname, join } from 'node:path';
-import { countBlocked, loadAllow } from './lib.mjs';
+import { loadAllow } from './lib.mjs';
 import { closeGaps, pictureSettings, textOf } from './pictures.mjs';
-import { loadTermLists, maskSecrets, maskTerms } from './sensitive.mjs';
+import { findingsIn, loadTermLists } from './sensitive.mjs';
 
 const EXTENSIONS = {
   'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp', 'image/bmp': '.bmp', 'image/tiff': '.tif', 'application/pdf': '.pdf',
@@ -37,14 +37,7 @@ if (mode !== 'off') {
       const read = textOf(file);
       if (read.text === undefined) result.unavailable = read.unavailable;
       else {
-        const text = closeGaps(read.text);
-        result.found = [
-          [countBlocked(text, loadAllow()), 'email address(es)'],
-          [maskSecrets(text).count, 'secret(s)'],
-          [maskTerms(text, loadTermLists(), true).count, 'confidential term(s)'],
-        ]
-          .filter(([count]) => count > 0)
-          .map(([count, kind]) => `${count} ${kind}`);
+        result.found = findingsIn(closeGaps(read.text), loadAllow(), loadTermLists());
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
