@@ -8,11 +8,13 @@
 //   - it is a `git commit` and the changes to be committed add an email address.
 
 import { execFileSync } from 'node:child_process';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { credentialKind, keyFilesPrinted } from './credentials.mjs';
 import { PLACEHOLDER, countBlocked, loadAllow, readHookInput } from './lib.mjs';
 import { isOffice } from './office.mjs';
 import { closeGaps, extractScript, isPicture, pictureSettings, textOf } from './pictures.mjs';
-import { cannotAsk, settingsFile } from './settings.mjs';
+import { cannotAsk, orgSettingsFile, settingsFile } from './settings.mjs';
 import { PERSONAL_PLACEHOLDER, SECRET_PLACEHOLDER, TERM_PLACEHOLDER, findingsIn, isOutbound, loadTermLists, maskSecrets, maskTerms } from './sensitive.mjs';
 
 const WRITING_FIELDS = { Write: ['content'], Edit: ['new_string'], NotebookEdit: ['new_source'] };
@@ -211,8 +213,22 @@ function keyFileReason(payload) {
 function settingsDecision(payload) {
   const input = payload.tool_input ?? {};
   const tool = payload.tool_name;
-  const named = (text) => /privacy-guard\.json/i.test(asText(text ?? ''));
-  const writes = ((tool === 'Write' || tool === 'Edit') && named(input.file_path)) || ((tool === 'Bash' || tool === 'PowerShell') && named(input.command) && /(?:>|\bset-content\b|\bout-file\b|\btee\b|\bsed\b|\bmv\b|\bcp\b|\bmove-item\b|\bcopy-item\b|\brm\b|\bremove-item\b|writeFile)/i.test(asText(input.command)));
+  // Only the settings files the guard really reads count: a file of the same name elsewhere, or the name inside
+  // a test or a text, is no change to the guard.
+  const guarded = [settingsFile(), orgSettingsFile()].filter(Boolean).map((file) => resolve(file).toLowerCase());
+  const home = homedir().replace(/\\/g, '/');
+  const isGuarded = (path) => {
+    const expanded = String(path)
+      .replace(/^["']|["']$/g, '')
+      .replace(/\\/g, '/')
+      .replace(/^(?:~|\$HOME|\$\{HOME\}|\$env:USERPROFILE|%USERPROFILE%)(?=\/|$)/i, home);
+    return guarded.includes(resolve(payload.cwd ?? process.cwd(), expanded).toLowerCase());
+  };
+  const named = (text) =>
+    asText(text ?? '')
+      .split(/[\s<>|;&()=,]+/)
+      .some((word) => /privacy-guard(?:\.org)?\.json["']?$/i.test(word) && isGuarded(word));
+  const writes = ((tool === 'Write' || tool === 'Edit') && isGuarded(input.file_path ?? '')) || ((tool === 'Bash' || tool === 'PowerShell') && named(input.command) && /(?:>|\bset-content\b|\bout-file\b|\btee\b|\bsed\b|\bmv\b|\bcp\b|\bmove-item\b|\bcopy-item\b|\brm\b|\bremove-item\b|writeFile)/i.test(asText(input.command)));
   // The rules skill's script is the way to change the settings. What tightens the guard (enable, add) runs;
   // what loosens it (a rule off, a value or a file allowed, a rule taken out) is the person's to confirm.
   const loosens = (tool === 'Bash' || tool === 'PowerShell') && /\brules\.mjs["']?\s+(?:disable|allow|remove|pictures)\b/.test(asText(input.command));

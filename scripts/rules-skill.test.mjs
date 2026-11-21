@@ -153,6 +153,24 @@ test('loosening the guard through the script is the person\'s to confirm; tighte
   }
 });
 
+test('only the settings file the guard reads is protected, not every file or text of that name', () => {
+  const p = profile({ enabledRules: ['iban'] });
+  const own = join(p.dir, 'privacy-guard.json');
+  const org = join(p.dir, 'org.json');
+  const decision = (tool, input, mode = 'default', cwd = p.dir) => p.hook('email-guard.mjs', { tool_name: tool, permission_mode: mode, cwd, tool_input: input })?.permissionDecision;
+  const project = join(p.dir, 'project');
+  assert.equal(decision('Edit', { file_path: own, old_string: 'a', new_string: 'b' }), 'ask');
+  assert.equal(decision('Write', { file_path: own, content: '{}' }, 'auto'), 'deny');
+  assert.equal(decision('Write', { file_path: org, content: '{}' }), 'ask');
+  assert.equal(decision('Bash', { command: `echo '{}' > "${own.replace(/\\/g, '/')}"` }), 'ask');
+  assert.equal(decision('Bash', { command: 'rm privacy-guard.json' }), 'ask');
+  // The same name in another folder, in a test file's text or in a read is no change to the guard.
+  assert.equal(decision('Write', { file_path: join(p.dir, 'project', 'privacy-guard.json'), content: '{}' }, 'auto'), undefined);
+  assert.equal(decision('Bash', { command: "cat >> scripts/a.test.mjs <<'EOF'\nconst file = join(dir, 'other', 'privacy-guard.json');\nEOF" }, 'auto', project), undefined);
+  assert.equal(decision('Bash', { command: 'git commit -m "docs: privacy-guard.json keys" && rm old.txt' }, 'auto', project), undefined);
+  assert.equal(decision('Bash', { command: `cat "${own.replace(/\\/g, '/')}"` }, 'auto'), undefined);
+});
+
 test('images and documents are handled each in their own way, and a session is told how', () => {
   const p = profile();
   const png = join(p.dir, 'shot.png');
