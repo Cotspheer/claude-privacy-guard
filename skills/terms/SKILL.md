@@ -22,6 +22,8 @@ the only way in.
 | Would the guard catch this text | `node terms.mjs test "some text"` |
 | Hand a team list to others | `node terms.mjs share <name>` |
 | Take over a team list | `node terms.mjs import <list.json> <list.key>` |
+| The key as a code, for a password manager | the user runs `node terms.mjs key copy <name>` (or `key show`) in their own terminal |
+| A key code received from a password manager | the user runs `node terms.mjs key set <name>` in their own terminal |
 
 ## Before the user tells you a term
 
@@ -96,6 +98,16 @@ explains it for people; read it before you help with sharing, and point the user
   key stays the same.
 - Someone leaves the team: a key cannot be taken back. A new list under a new name, the terms typed again,
   shared again; the old two files are deleted everywhere.
+
+**The key through a password manager**
+
+A key is one line of 64 characters, so it fits the password field of an entry in Bitwarden, Proton Pass,
+Devolutions or any other password manager, and travels with that entry's sharing. Three commands move it,
+and the user runs each in their own terminal: `key copy <name>` puts the code on the clipboard, `key show
+<name>` prints it, `key set <name>` asks for a code and writes the key file. You cannot run them: the guard
+refuses the call, and the script refuses outside a terminal, so that the code never lands in a conversation.
+Give the user the command in a message of its own, alone in a code block, with the full path of `terms.mjs`
+filled in, and say what they will see. After `key set`, run `status` and report the list's line.
 
 **The key**
 

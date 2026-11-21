@@ -165,14 +165,17 @@ function validCard(value) {
   return CARD_ISSUERS.some(([prefix, lengths]) => prefix.test(digits) && lengths.includes(digits.length)) && luhn(digits);
 }
 
-/** The lengths of the IBANs of the countries met most often; other countries pass by checksum alone. */
-const IBAN_LENGTH = { CH: 21, LI: 21, DE: 22, AT: 20, FR: 27, IT: 27, ES: 24, NL: 18, BE: 16, LU: 20, GB: 22, IE: 22, PT: 25, DK: 18, SE: 24, NO: 15, FI: 18, PL: 28 };
+/** The countries that use IBANs, with the length of theirs. A value under another country code is no IBAN. */
+const IBAN_LENGTH = {
+  CH: 21, LI: 21, DE: 22, AT: 20, FR: 27, IT: 27, ES: 24, NL: 18, BE: 16, LU: 20, GB: 22, IE: 22, PT: 25, DK: 18, SE: 24, NO: 15, FI: 18, PL: 28,
+  CZ: 24, SK: 24, HU: 28, RO: 24, BG: 22, HR: 21, SI: 19, GR: 27, CY: 28, MT: 31, EE: 20, LV: 21, LT: 20, IS: 26, MC: 27, SM: 27, TR: 26, IL: 23, AE: 23, SA: 24,
+};
 
 function validIban(value) {
+  // An IBAN is written in capitals, or typed all in small letters. Mixed case is encoded data.
+  if (/[a-z]/.test(value) && /[A-Z]/.test(value)) return false;
   const iban = value.replace(/\s/g, '').toUpperCase();
-  if (iban.length < 15 || iban.length > 34) return false;
-  const expected = IBAN_LENGTH[iban.slice(0, 2)];
-  if (expected && iban.length !== expected) return false;
+  if (iban.length !== IBAN_LENGTH[iban.slice(0, 2)]) return false;
   // The checksum of ISO 13616: the first four characters moved to the end, letters read as 10 to 35, modulo 97.
   const moved = iban.slice(4) + iban.slice(0, 4);
   let remainder = 0;
@@ -202,7 +205,7 @@ function validPhone(value) {
 
 const PERSONAL = [
   pattern('payment-card', 'personal', /(?<![\d.-])\d(?:[ -]?\d){12,18}(?!\d|[.-]\d)/, { valid: validCard, optIn: true }),
-  pattern('iban', 'personal', /(?<![A-Za-z0-9])[A-Za-z]{2}\d{2}(?: ?[A-Za-z0-9]{4}){2,7}(?: ?[A-Za-z0-9]{1,3})?(?![A-Za-z0-9])/, { valid: validIban, optIn: true }),
+  pattern('iban', 'personal', /(?<![A-Za-z0-9+/=_-])[A-Za-z]{2}\d{2}(?: ?[A-Za-z0-9]{4}){2,7}(?: ?[A-Za-z0-9]{1,3})?(?![A-Za-z0-9+/=_-])/, { valid: validIban, optIn: true }),
   pattern('ch-ahv-number', 'personal', /(?<![\d.])756[. ]?\d{4}[. ]?\d{4}[. ]?\d{2}(?!\d|\.\d)/, { valid: validAhv, optIn: true, keywords: ['756'] }),
   pattern('us-ssn', 'personal', /(?<![\d-])(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}(?![\d-])/, { optIn: true }),
   pattern(
@@ -217,24 +220,69 @@ const PERSONAL = [
 
 // ---------------------------------------------------------------------------------------------------------
 
+// Rules of the person's or the organisation's own, from "customRules" in the settings. A rule is data, never
+// code: a pattern, and optionally one of the checksums below.
+//
+//   { "id": "matter-number", "kind": "personal", "pattern": "\\bM-\\d{4}-\\d{5}\\b",
+//     "flags": "i", "group": 0, "keywords": ["m-"], "check": "luhn", "description": "..." }
+
+/** The checksums a custom rule can name. */
+export const CHECKS = {
+  luhn: (value) => luhn(digitsOf(value)),
+  iban: validIban,
+  ean13: validAhv,
+};
+
+/** A custom rule from its description in the settings. Throws with the reason when the description is unusable. */
+export function customRule(spec) {
+  if (!/^[a-z][a-z0-9-]{2,40}$/.test(spec.id ?? '')) throw new Error('the id is 3 to 41 lower-case letters, digits and hyphens, starting with a letter');
+  if (spec.id.startsWith('gl-') || [...BUILT_IN, ...PERSONAL].some((rule) => rule.id === spec.id) || spec.id === 'personal') throw new Error(`the id "${spec.id}" is taken by a built-in rule`);
+  if (spec.kind !== 'secret' && spec.kind !== 'personal') throw new Error('the kind is "secret" or "personal"');
+  if (spec.check !== undefined && !CHECKS[spec.check]) throw new Error(`the check is one of ${Object.keys(CHECKS).join(', ')}`);
+  const flags = typeof spec.flags === 'string' ? spec.flags : '';
+  if (!/^[imsu]*$/.test(flags)) throw new Error('the flags are a choice of i, m, s and u');
+  let regex;
+  try {
+    regex = new RegExp(spec.pattern, flags);
+  } catch (error) {
+    throw new Error(`the pattern does not compile (${error.message})`);
+  }
+  if (regex.test('')) throw new Error('the pattern matches the empty text');
+  const group = Number.isInteger(spec.group) && spec.group > 0 ? spec.group : 0;
+  const keywords = Array.isArray(spec.keywords) ? spec.keywords.filter((word) => typeof word === 'string' && word).map((word) => word.toLowerCase()) : [];
+  return { ...pattern(spec.id, spec.kind, regex, { group, valid: spec.check ? CHECKS[spec.check] : undefined, keywords: keywords.length ? keywords : undefined }), custom: true };
+}
+
+function customRules() {
+  const rules = [];
+  for (const spec of loadSettings().customRules) {
+    try {
+      rules.push(customRule(spec));
+    } catch {
+      // A rule that cannot be used is left out; the rules skill reports it.
+    }
+  }
+  return rules;
+}
+
 let active;
 
 /**
- * The rules in force: the built-in ones and the gitleaks ones, plus the personal ones named in enabledRules
- * ("personal" there switches all of them on).
+ * The rules in force: the built-in ones, the gitleaks ones and the custom ones, plus the personal ones named
+ * in enabledRules ("personal" there switches all of them on).
  */
 export function activeRules() {
   if (active) return active;
   const settings = loadSettings();
   const off = new Set(settings.disabledRules);
   const on = new Set(settings.enabledRules);
-  active = [...BUILT_IN, ...PERSONAL, ...gitleaksRules()].filter((rule) => !off.has(rule.id) && (!rule.optIn || on.has(rule.id) || (rule.kind === 'personal' && on.has('personal'))));
+  active = [...customRules(), ...BUILT_IN, ...PERSONAL, ...gitleaksRules()].filter((rule) => !off.has(rule.id) && (!rule.optIn || on.has(rule.id) || (rule.kind === 'personal' && on.has('personal'))));
   return active;
 }
 
-/** Every rule's id, kind and whether it has to be switched on, for the docs and the audit. */
+/** Every rule's id, kind, whether it has to be switched on and whether it is a custom one. */
 export function allRules() {
-  return [...BUILT_IN, ...PERSONAL, ...gitleaksRules()].map(({ id, kind, optIn }) => ({ id, kind, optIn: Boolean(optIn) }));
+  return [...customRules(), ...BUILT_IN, ...PERSONAL, ...gitleaksRules()].map(({ id, kind, optIn, custom }) => ({ id, kind, optIn: Boolean(optIn), custom: Boolean(custom) }));
 }
 
 let allowed;
@@ -254,6 +302,25 @@ function isAllowedValue(value) {
   }
   return allowed.values.has(value) || allowed.patterns.some((regex) => regex.test(value));
 }
+
+/**
+ * What one rule alone finds in the text, whether it is switched on or not: [[start, end], ...]. For the check
+ * of a rule against a history, where the other rules must not take its findings.
+ */
+export function findWith(id, text) {
+  const rule = (ruleIndex ??= new Map([...customRules(), ...BUILT_IN, ...PERSONAL, ...gitleaksRules()].map((item) => [item.id, item]))).get(id);
+  if (!rule || typeof text !== 'string' || text.length < 8) return [];
+  if (rule.keywords?.length) {
+    const lowered = text.toLowerCase();
+    if (!rule.keywords.some((keyword) => lowered.includes(keyword))) return [];
+  }
+  try {
+    return rule.find(text).filter(([start, end]) => !text.slice(start, end).includes(' hidden]') && !isAllowedValue(text.slice(start, end)));
+  } catch {
+    return [];
+  }
+}
+let ruleIndex;
 
 /**
  * Where the rules find something in the text: [{ start, end, rule, kind }], in order and without overlaps.

@@ -86,6 +86,14 @@ function reasonToDeny(payload) {
     );
   }
 
+  // A key as a code is for the person's eyes and their password manager; the script also refuses without a terminal.
+  if ((tool === 'Bash' || tool === 'PowerShell') && /\bterms\.mjs["']?\s+key\b/.test(asText(input.command))) {
+    return (
+      'privacy-guard: the key commands of the terms skill put a key code on the screen or the clipboard, so the person runs them in their own terminal. ' +
+      'Give them the command in a message of its own, alone in a code block, with the full path filled in.'
+    );
+  }
+
   const outbound = isOutbound(tool, input);
   const lists = loadTermLists();
   const found = fieldsWith(input, (text) => maskTerms(text, lists, !outbound).count);
@@ -146,7 +154,7 @@ function pictureDecision(payload) {
     return { deny: `privacy-guard: an Office document is not opened with the file tool. ${instead} The text of pictures embedded in it is included.` };
   }
   if (!isPicture(path)) return undefined;
-  const settings = pictureSettings();
+  const settings = pictureSettings(path);
   if (settings.mode === 'off') return undefined;
   if (settings.mode === 'strict' && !settings.isAllowed(path)) {
     return { deny: `privacy-guard: pictures and PDFs are not opened on this computer (the guard is set to "strict"). ${instead}` };
@@ -205,8 +213,13 @@ function settingsDecision(payload) {
   const tool = payload.tool_name;
   const named = (text) => /privacy-guard\.json/i.test(asText(text ?? ''));
   const writes = ((tool === 'Write' || tool === 'Edit') && named(input.file_path)) || ((tool === 'Bash' || tool === 'PowerShell') && named(input.command) && /(?:>|\bset-content\b|\bout-file\b|\btee\b|\bsed\b|\bmv\b|\bcp\b|\bmove-item\b|\bcopy-item\b|\brm\b|\bremove-item\b|writeFile)/i.test(asText(input.command)));
-  if (!writes) return undefined;
-  const what = "privacy-guard: this call changes the guard's settings (privacy-guard.json), where rules are switched off and files are allowed.";
+  // The rules skill's script is the way to change the settings. What tightens the guard (enable, add) runs;
+  // what loosens it (a rule off, a value or a file allowed, a rule taken out) is the person's to confirm.
+  const loosens = (tool === 'Bash' || tool === 'PowerShell') && /\brules\.mjs["']?\s+(?:disable|allow|remove|pictures)\b/.test(asText(input.command));
+  if (!writes && !loosens) return undefined;
+  const what = loosens
+    ? 'privacy-guard: this call loosens the guard: it switches a rule off, allows a value, a file or a folder, takes a rule out, or changes how pictures are handled.'
+    : "privacy-guard: this call changes the guard's settings (privacy-guard.json), where rules are switched off and files are allowed.";
   if (cannotAsk(payload.permission_mode)) {
     return { deny: `${what} The person has to confirm that, and this session runs in the permission mode "${payload.permission_mode}", where a question does not reach them. Show them the change and let them make it.` };
   }

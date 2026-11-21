@@ -23,8 +23,8 @@ const EXTENSIONS = {
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
 const item = JSON.parse(input);
-const mode = pictureSettings().mode;
 const extension = EXTENSIONS[item.mediaType] ?? extname(item.filename ?? '').toLowerCase();
+const mode = pictureSettings(`pasted${extension}`).mode;
 
 let result = { mode, found: [] };
 if (mode !== 'off') {

@@ -58,16 +58,19 @@ function textOfOffice(path) {
 }
 
 /**
- * How pictures are handled, from privacy-guard.json in the Claude config folder:
+ * How a file is handled, from privacy-guard.json in the Claude config folder:
  *   "check"    (default) read the text first; refuse the picture when it holds an address, a secret or a term
  *   "confirm"  the same check, and the person is asked before every picture Claude opens
  *   "strict"   no pictures, except below the folders in "picturesAllowed"
  *   "off"      pictures pass unread
+ * The mode is set for all files, or apart for images (screenshots, photos, scans) and for documents (PDFs,
+ * and Office files pasted into a message).
  */
-export function pictureSettings() {
+export function pictureSettings(path = '') {
   const settings = loadSettings();
+  const kind = IMAGES.has(extname(path).toLowerCase()) ? 'images' : 'documents';
   const allowed = settings.picturesAllowed.map((folder) => resolve(folder).toLowerCase());
-  return { mode: settings.pictures, isAllowed: (path) => allowed.some((folder) => resolve(path).toLowerCase().startsWith(folder)) };
+  return { kind, mode: settings.pictures[kind], isAllowed: (path) => allowed.some((folder) => resolve(path).toLowerCase().startsWith(folder)) };
 }
 
 function run(command, args) {

@@ -32,7 +32,7 @@ function attachedFiles() {
       if (!statSync(path).isFile()) continue;
       // An attached image or PDF reaches Claude as a picture; its text is read here, as for a file read.
       if (isPicture(path)) {
-        if (pictureSettings().mode === 'off') continue;
+        if (pictureSettings(path).mode === 'off') continue;
         const read = textOf(path);
         if (read.text !== undefined) files.push({ named, text: closeGaps(read.text), picture: true });
         continue;

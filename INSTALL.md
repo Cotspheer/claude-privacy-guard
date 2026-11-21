@@ -83,6 +83,7 @@ get it right.
 | The rule | Tells every session why, and what to do when a task seems to need an address | the plugin, a repository's `.claude/rules/`, `claudeMd` in managed settings |
 | Skill `email-address-privacy` | The same rule for places without hooks | claude.ai (web chats, Cowork, the Office add-ins), from where it also reaches Claude Code and cloud sessions |
 | Skill `audit` | Reports which past sessions and which files hold an address, by domain only | the plugin (`/privacy-guard:audit`) |
+| Skill `rules` | Switches rules on and off, allows values a rule is wrong about, builds a rule from a description and checks whether it would get in the way | the plugin (`/privacy-guard:rules`) |
 | Skill `terms` | Adds, removes, checks and shares confidential terms; tells whether a term would get in the way | the plugin (`/privacy-guard:terms`) |
 | Telemetry settings | Switch off error reports, the feedback command and the survey; optionally usage metrics and updates | `settings.json` (user or managed) |
 | Host block | Points the two telemetry-only hosts nowhere | the computer's hosts file; the person runs it |
@@ -374,8 +375,20 @@ Ask how they want pictures handled:
 - **strict**: no image or PDF is opened, except below folders they name. Claude can still get the text.
 - **off**: pictures pass unread.
 
-For anything but "check", write the choice into `privacy-guard.json` in their Claude config folder, after
-showing it: `{ "pictures": "confirm" }`, or `{ "pictures": "strict", "picturesAllowed": ["<folder>"] }`.
+Then ask whether images and PDFs should be handled the same way. Someone who shows Claude screenshots all
+day (of their own app, of an error) may want the check off for images and on for PDFs. Say what "off" for
+images means: a screenshot with an address, a key or a client name in it reaches Claude as it is.
+
+Apply anything but "check" with the rules skill's script; Claude Code asks them to confirm, because the
+command loosens or changes the guard:
+
+- all files: `node skills/rules/rules.mjs pictures confirm`
+- one kind: `node skills/rules/rules.mjs pictures images off` (the kinds are `images` and `documents`;
+  documents are PDFs and Office files pasted into a message)
+- folders that pass in "strict" and "confirm": `node skills/rules/rules.mjs allow folder "<folder>"`
+
+Office files that Claude reads from disk always go through the reader, whatever is set here: the file tool
+cannot open them.
 
 Tell them the limits:
 
@@ -417,12 +430,18 @@ Then ask one question: should the guard also look for personal data? Name the fi
 A developer who works with test IBANs or card numbers should know that those will be hidden in tool output
 too; single test values go under `allowedValues`.
 
-Write their choice into `privacy-guard.json` in the Claude config folder, after showing it, and keep the keys
-the file already has. Claude Code will ask them to confirm the write: the guard has every change to its own
-settings confirmed by the person. The content: `{ "enabledRules": ["iban", "ch-ahv-number"] }`. `"personal"` stands for all five.
+Apply their choice with the rules skill's script, which keeps the other keys of `privacy-guard.json`:
+`node skills/rules/rules.mjs enable iban ch-ahv-number` (`personal` stands for all five). Then run
+`node skills/rules/rules.mjs check <the rules you switched on>` and tell them the verdict for each: it replays
+the rule against their stored sessions of the last 30 days.
+
+Then ask one more question: is there a kind of value of their own to protect, one with a fixed shape, such as
+a matter number, a customer id or a patient number? If yes, follow `skills/rules/SKILL.md`, section "A new rule
+from a description". If no, tell them the skill does this later: `/privacy-guard:rules`.
 
 If they have files the credential guard should leave alone (a test certificate, a `.env.test` without real
-values), add them as `"credentialFilesAllowed": [".env.test", "tests/fixtures/*.pem"]`.
+values): `node skills/rules/rules.mjs allow file ".env.test"`. That command loosens the guard, so Claude Code
+asks them to confirm it.
 
 ### A6. Confidential terms
 
@@ -518,7 +537,10 @@ in a question of their own; ask them one at a time.
    folder `data/` (the rules converted from gitleaks, with their licences) to
    `.claude/hooks/privacy-guard/data/`.
 2. Copy `rules/email-address.md` and `rules/documents.md` into `.claude/rules/` there. In the copy of
-   `documents.md`, replace `{extract}` with `.claude/hooks/privacy-guard/extract-text.mjs`. Files in that
+   `documents.md`, replace `{extract}` with `.claude/hooks/privacy-guard/extract-text.mjs`, and the line
+   `{handling}` with: `- Images and PDFs: open them with your file tool as usual. The guard reads each one
+   first; when it refuses one, it tells you, and you work from the reader's text.` and
+   `- Word, Excel, PowerPoint and OpenDocument files: always through the reader.` Files in that
    folder are always in context, so the repository does not need the skill as well.
 3. Merge `settings/repository-hooks.json` into the repository's `.claude/settings.json`. Keep the hooks it
    already has.
@@ -564,7 +586,16 @@ Start from `settings/managed-settings.example.json`:
    distribution instead of switching updates off. Take `DISABLE_TELEMETRY` out (level 1) if members rely on
    Remote Control connecting by itself or on skills from claude.ai reaching Claude Code (C2).
 4. Add the entries of `settings/hardening.json` the organisation wants (A5).
-5. Keep the `appendPlugins` entry. It puts the plugin on the organisation's own tier, together with the two
+5. Rules for everyone (optional): ask whether the organisation wants personal data rules switched on for
+   all members, or rules of its own (a matter number, a customer id). If yes, build and test each rule with
+   the rules skill (`skills/rules/SKILL.md`) and write them into a file in the format of
+   `settings/privacy-guard.org.example.json`. The organisation puts that file on every device with its device
+   management and names it in the managed settings:
+   `"env": { "PRIVACY_GUARD_ORG_SETTINGS": "<full path of the file>" }`. An organisation that hosts its own
+   copy of the plugin can commit the file there as `privacy-guard.org.json` in the top folder instead. What
+   the file switches on, a member's own settings cannot switch off. Tell them this was tested with a file and
+   the environment variable on one computer, not through a managed rollout.
+6. Keep the `appendPlugins` entry. It puts the plugin on the organisation's own tier, together with the two
    entries above it (`enabledPlugins` and the marketplace with a remote source); all three are needed. Without
    it the plugin counts as one a person installed, and Claude Code's built-in security plugin, which runs
    first on organisation accounts, skips its removal of the account address. Use `appendPlugins`, not

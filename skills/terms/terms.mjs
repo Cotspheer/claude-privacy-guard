@@ -9,14 +9,22 @@
 //   node terms.mjs test   [<text>...]                               would the guard catch this text, and which list
 //   node terms.mjs share  <name>                                    how to hand a shared list to others
 //   node terms.mjs import <list.json> [<list.key>]                  take a shared list over
+//   node terms.mjs key copy <name>                                  the key as a code on the clipboard, for a password manager
+//   node terms.mjs key show <name>                                  the key as a code on the screen
+//   node terms.mjs key set  <name>                                  type or paste a key code; writes the key file
+//
+// The key commands work only in a terminal a person sits at. Run by Claude, they refuse: the code would
+// land in the conversation.
 //
 // Without --list a term goes to the personal list, a plain text file. With --list <name> it goes to a shared
 // list, which holds keyed hashes instead of terms; its key sits in a file of its own.
 
 import { randomBytes } from 'node:crypto';
 import { chmodSync, copyFileSync, createReadStream, existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import { configDir } from '../../scripts/lib.mjs';
 import { hashTerm, isOutbound, loadTermLists, maskTerms, parseTerm, sharedKeyFile, sharedListFile, termsDir, termsFile } from '../../scripts/sensitive.mjs';
 
@@ -183,13 +191,18 @@ function share() {
       '',
       'What you do:',
       '  1. Send the list file to your colleagues: mail, chat, a shared drive or a repository.',
-      '  2. Send the key file another way, one you would trust with a password: your password manager\'s',
-      '     sharing, or in person. Never put both files into the same message or the same repository.',
+      '  2. Hand the key over another way, one you would trust with a password. The simplest is your password',
+      '     manager (Bitwarden, Proton Pass, Devolutions and the like). In your own terminal, not through Claude:',
+      `         node "${fileURLToPath(import.meta.url)}" key copy ${name}`,
+      '     That puts the key as a code on the clipboard. Paste it into a new entry as the password, name the',
+      '     entry after the list, and share the entry. Never put list and key into the same message or repository.',
       '',
       'What each colleague does:',
-      '  1. Save both files into their Claude config folder (~/.claude; on Windows C:\\Users\\<name>\\.claude)',
-      '     and keep the file names. Or tell their Claude: "import this team list", naming the two files.',
-      '  2. Ask their Claude for the status of the terms lists. The list must show "key present".',
+      '  1. Save the list file into their Claude config folder (~/.claude; on Windows C:\\Users\\<name>\\.claude)',
+      '     and keep its name. Or tell their Claude: "import this team list", naming the file.',
+      `  2. Copy the key code from the password manager and run, in their own terminal: node <the plugin's skills/terms/terms.mjs> key set ${name}`,
+      '     It asks for the code and writes the key file. Claude tells them the full command when asked.',
+      '  3. Ask their Claude for the status of the terms lists. The list must show "key present".',
       '',
       'Later:',
       '  - You add or remove a term: send the list file again. The key stays the same.',
@@ -305,6 +318,56 @@ async function check() {
   });
 }
 
-const commands = { add, remove, mode, status, share, import: importList, check, test };
-if (!commands[command]) fail('Commands: status, add, remove, mode, check, test, share, import. See the top of this file.');
+// --- key: the key as a code, for a password manager -------------------------------------------------------
+
+/** Reads one line from the keyboard without showing it. */
+function readHidden(question) {
+  return new Promise((resolve) => {
+    const reader = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    reader.question(question, (answer) => {
+      reader.close();
+      process.stdout.write('\n');
+      resolve(answer.trim());
+    });
+    // What is typed or pasted after the question is not echoed.
+    reader._writeToOutput = () => {};
+  });
+}
+
+async function key() {
+  const action = args.shift();
+  const name = args[0] ?? listName;
+  if (!['copy', 'show', 'set'].includes(action) || !name || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) fail('Use: key copy <name>, key show <name> or key set <name>.');
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    fail('The key commands run only in a terminal a person sits at, so that the key code never lands in a conversation. Open a terminal and run the command there yourself.');
+  }
+  const file = sharedKeyFile(name);
+  if (action === 'set') {
+    if (existsSync(file) && !flag('--replace')) fail(`The list "${name}" has a key already: ${file}. To replace it, run the command again with --replace.`);
+    const code = (await readHidden(`Paste the key code of the list "${name}" and press Enter (it is not shown): `)).replace(/\s+/g, '');
+    if (!/^[0-9a-f]{32,}$/i.test(code)) fail('That is no key code: a key is 64 characters, the digits 0 to 9 and the letters a to f. Nothing was written.');
+    writeFileSync(file, `${code.toLowerCase()}\n`, { mode: 0o600 });
+    try {
+      chmodSync(file, 0o600);
+    } catch {}
+    console.log(`Written: ${file}`);
+    console.log(existsSync(sharedListFile(name)) ? 'The list file is there too: the guard applies the list from now on.' : `The list file is still missing: save privacy-guard.terms.${name}.json into ${termsDir()}.`);
+    return;
+  }
+  if (!existsSync(file)) fail(`The list "${name}" has no key file here: ${file}`);
+  const code = readFileSync(file, 'utf8').trim();
+  if (action === 'show') {
+    console.log(`The key code of the list "${name}". Treat it like a password, and clear the screen afterwards:\n\n${code}\n`);
+    return;
+  }
+  const tools = process.platform === 'win32' ? [['clip.exe', []]] : process.platform === 'darwin' ? [['pbcopy', []]] : [['wl-copy', []], ['xclip', ['-selection', 'clipboard']], ['xsel', ['--clipboard', '--input']]];
+  const copied = tools.some(([tool, toolArgs]) => spawnSync(tool, toolArgs, { input: code }).status === 0);
+  if (!copied) fail('The clipboard could not be reached on this computer. Use: key show ' + name);
+  console.log(`The key code of the list "${name}" is on the clipboard.`);
+  console.log('Paste it into a new entry of your password manager, as the password, and name the entry after the list.');
+  console.log('Then copy something else: the code stays on the clipboard until you do, and a clipboard history keeps it longer.');
+}
+
+const commands = { add, remove, mode, status, share, import: importList, check, test, key };
+if (!commands[command]) fail('Commands: status, add, remove, mode, check, test, share, import, key. See the top of this file.');
 await commands[command]();

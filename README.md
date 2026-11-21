@@ -14,12 +14,13 @@ guard your own.
 | Secrets | A call that leaves the computer (web search, fetch, MCP tools, shell commands that call out) is denied when it holds one. A secret is recognised by its format (about 200 services, from the gitleaks rules), as the password inside an address such as `postgres://user:…@host`, or as a random-looking value right after a word such as `token` or `password`. Randomness alone is never enough, so commit ids, hashes and UUIDs pass. |
 | Credential files | Reading or printing a file of private keys or tokens (`id_rsa`, `*.pem`, `.aws/credentials`, `.git-credentials`) is refused. A file of `NAME=value` lines (`.env`, `.npmrc`) is read with the names shown and the values hidden, and so is the output of a command that names one. A listing of the environment (`env`, `printenv`) loses the values under names that sound like a secret. |
 | Personal data | Off until you switch it on, per rule: IBAN, the Swiss AHV number, payment card numbers, phone numbers, US social security numbers. Each is validated (a checksum, a numbering plan), so a row of digits alone is no match. |
+| Rules of your own | A skill builds a rule from your description of a value (a matter number, a customer id), tries it on examples, and checks against your own session history whether it would get in your way. An organisation can lay its rules under everyone's. |
 | Confidential terms | Your own list of names (clients, matters, projects) that such calls may never hold. A term is caught across spacing, case, accents and typing mistakes, and by sound (German and English spelling) where you mark it. You can also keep the terms out of Claude's view entirely. A skill adds terms and checks against your own session history whether one would get in your way. A team shares a list that holds keyed hashes in place of the names. |
 | Prompts | A message you send with an address or a secret in it comes back unsent, with the reason and a copy of the message in which those values are replaced, ready to send. A message that attaches a file with `@` that holds one comes back too. |
 | Account address | The address of the account Claude runs under is left out of the context it is given. |
 | Pasted files | An image or document pasted into a message is read before the message is sent. If it holds an address, a secret or a term kept from Claude, the message comes back unsent. |
 | Office files | Word, Excel, PowerPoint and OpenDocument files reach Claude as text from the guard's own reader, with the text of pictures embedded in them and the values hidden. A rule tells Claude to pass images that its own extraction tools produce through the same reader. |
-| Images and PDFs | Before Claude opens one, the guard reads its text on this computer and runs the same rules over it. A file with an address, a secret, personal data or a term kept from Claude is refused, and Claude works from the text with those values hidden. You can also be asked before every picture; in a permission mode where no question reaches you (auto, bypass), the picture is refused in place of the question. |
+| Images and PDFs | Before Claude opens one, the guard reads its text on this computer and runs the same rules over it. A file with an address, a secret, personal data or a term kept from Claude is refused, and Claude works from the text with those values hidden. The check is set for all files or apart for images and for PDFs, so that someone who works with screenshots all day can switch it off for images and keep it for documents. You can also be asked before every picture; in a permission mode where no question reaches you (auto, bypass), the picture is refused in place of the question. |
 | Commits | A `git commit` whose changes add an address is denied. |
 | The rule | Tells each session why. It comes with the plugin, through a repository, or through an organisation's managed settings, and as a skill for claude.ai, where no hook exists. |
 | Audit | Lists which past sessions and which files hold an address, by mail domain only. |
@@ -52,8 +53,9 @@ per address or `@domain`, in `~/.claude/email-guard.allow.txt`.
 ## Rules and settings
 
 Secrets and personal data are found by rules, each with an id such as `github-token`, `keyword-secret`,
-`gl-stripe-access-token` or `iban`. Every message of the guard names the rule that fired. The settings live in
-`~/.claude/privacy-guard.json`; every key is optional:
+`gl-stripe-access-token` or `iban`. Every message of the guard names the rule that fired. The skill `rules`
+(`/privacy-guard:rules`) switches rules, allows values and adds rules of your own; what loosens the guard asks
+you first. The settings live in `~/.claude/privacy-guard.json`; every key is optional:
 
 | Key | What it does |
 |---|---|
@@ -61,9 +63,11 @@ Secrets and personal data are found by rules, each with an id such as `github-to
 | `disabledRules` | Switches a rule off by its id |
 | `allowedValues` | Exact values no rule reports, such as a documented example key |
 | `allowedPatterns` | Regular expressions; a value one of them matches whole is not reported |
+| `customRules` | Rules of your own: an id, a kind, a pattern and optionally a checksum (`luhn`, `iban`, `ean13`). Data, no code. The skill writes them |
 | `credentialFiles` | `"guard"` (default) or `"off"` |
 | `credentialFilesAllowed` | File patterns the credential guard leaves alone, such as `.env.test` or `tests/fixtures/*.pem` |
-| `pictures`, `picturesAllowed` | How images and PDFs are handled, see INSTALL.md |
+| `pictures` | How images and PDFs are handled: `"check"` (default), `"confirm"`, `"strict"` or `"off"`, for all files or per kind: `{ "images": "off", "documents": "check" }` |
+| `picturesAllowed` | Folders whose pictures pass in `"strict"` and `"confirm"` |
 
 ```json
 {
@@ -73,7 +77,12 @@ Secrets and personal data are found by rules, each with an id such as `github-to
 }
 ```
 
-A new check is one entry in the list in `scripts/rules.mjs`: an id, a pattern and, where there is one, a
+An organisation lays a second file of the same format under each person's: the file that
+`PRIVACY_GUARD_ORG_SETTINGS` names (set through `env` in managed settings), or `privacy-guard.org.json` in its
+own copy of the plugin. What that file switches on, a person's settings cannot switch off.
+[settings/privacy-guard.org.example.json](settings/privacy-guard.org.example.json) is a starting point.
+
+A new built-in check is one entry in the list in `scripts/rules.mjs`: an id, a pattern and, where there is one, a
 checksum. It then applies everywhere the guard looks: tool calls, tool output, messages, attached and pasted
 files, and the text read from pictures, PDFs and Office documents.
 
@@ -117,6 +126,7 @@ files, and the text read from pictures, PDFs and Office documents.
 | `rules/email-address.md`, `rules/documents.md` | the rule, and how Claude reads documents and pictures |
 | `skills/email-address-privacy/` | the rule as a skill, for claude.ai |
 | `skills/audit/` | the audit of sessions and files, and the check of which hosts Claude contacts (`/privacy-guard:audit`) |
+| `skills/rules/` | rules: switch on and off, allow values, add rules of your own, check them (`/privacy-guard:rules`) |
 | `skills/terms/` | confidential terms: add, remove, check, share (`/privacy-guard:terms`); [SHARING.md](skills/terms/SHARING.md) explains team lists |
 | `hooks/hooks.json`, `.claude-plugin/` | the plugin, its marketplace entry and its icon |
 | `hooks/register.ts`, `scripts/check-media.mjs` | the hooks module: the account address left out of the context, and the check of pasted files |

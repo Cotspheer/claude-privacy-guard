@@ -83,7 +83,7 @@ test('a shared list holds no term in plain text and still catches spacing, case 
 test('a shared list without its key is not applied, and import brings list and key', () => {
   const author = configFolder();
   terms(author, 'add', '--list', 'matter-7', 'Zebrafinch Holdings');
-  assert.match(terms(author, 'share', 'matter-7'), /Send the key file another way/);
+  assert.match(terms(author, 'share', 'matter-7'), /key copy matter-7/);
 
   const colleague = configFolder();
   assert.match(terms(colleague, 'import', join(author, 'privacy-guard.terms.matter-7.json')), /key is still missing/);
@@ -161,4 +161,14 @@ test('share lists the steps for the sender and the receiver, and import reports 
   const imported = terms(colleague, 'import', join(author, 'privacy-guard.terms.team.json'), join(author, 'privacy-guard.terms.team.key'));
   assert.match(imported, /Its key is present/);
   assert.match(terms(colleague, 'test', 'Project Falcon'), /caught by the list team/);
+});
+
+test('the key as a code is for a person at a terminal: the script refuses elsewhere, and the guard refuses the call', () => {
+  const config = configFolder();
+  terms(config, 'add', '--list', 'team', 'Project Falcon');
+  for (const action of ['copy', 'show', 'set']) assert.match(terms(config, 'key', action, 'team'), /only in a terminal a person sits at/);
+  const call = hook('email-guard.mjs', { tool_name: 'Bash', tool_input: { command: 'node "C:/x/skills/terms/terms.mjs" key show team' } }, config);
+  assert.equal(call.denied, true);
+  assert.match(call.reason, /in their own terminal/);
+  assert.equal(hook('email-guard.mjs', { tool_name: 'Bash', tool_input: { command: 'node terms.mjs status' } }, config).denied, false);
 });

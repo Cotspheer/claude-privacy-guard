@@ -32,8 +32,17 @@ It uses the `terms` skill and does the steps below with you. By hand, the comman
    own session history. Replace those with a more distinctive form before you share.
 3. **Find the two files.** (`node terms.mjs share team`) prints where they are and repeats these steps.
 4. **Send the list file** to your colleagues: mail, chat, a shared drive, or commit it to a repository.
-5. **Send the key file another way**, one you would trust with a password: the sharing function of your
-   password manager, or in person. Never put the key into the same message or the same repository as the list.
+5. **Hand the key over another way**, one you would trust with a password. The simplest is your password
+   manager (Bitwarden, Proton Pass, Devolutions and the like). In your own terminal, run
+   `node <the plugin's skills/terms/terms.mjs> key copy <name>`; ask Claude for the full command. It puts the
+   key as a code on the clipboard. Paste it into a new entry as the password, name the entry after the list,
+   and share the entry with your colleagues. Copy something else afterwards, so the code leaves the
+   clipboard. `key show <name>` prints the code if you prefer to copy it by hand. Sending the key file itself
+   works too. Never put the key into the same message or the same repository as the list.
+
+   A colleague who receives the code runs `node <...>/terms.mjs key set <name>` in their own terminal and
+   pastes it. That writes the key file. Claude cannot run these three commands, by design: the code would
+   land in the conversation.
 
 ## You receive a list
 

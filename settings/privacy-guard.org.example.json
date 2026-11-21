@@ -1,0 +1,14 @@
+{
+  "enabledRules": ["iban", "ch-ahv-number"],
+  "customRules": [
+    {
+      "id": "matter-number",
+      "kind": "personal",
+      "pattern": "(?<![A-Za-z0-9])M-\\d{4}-\\d{5}(?![A-Za-z0-9])",
+      "flags": "i",
+      "keywords": ["m-"],
+      "description": "matter numbers: M, a year, five digits"
+    }
+  ],
+  "allowedValues": ["CH93 0076 2011 6238 5295 7"]
+}
